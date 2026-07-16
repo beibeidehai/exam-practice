@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>AI刷题</title>
+<style>
+  :root {
+    --c1: #4f46e5; --c2: #6366f1; --bg: #f5f5f7; --card: #fff;
+    --text: #1e1e2e; --sub: #6b7280; --err: #ef4444; --ok: #22c55e;
+    --warn: #f59e0b; --radius: 14px; --shadow: 0 1px 3px rgba(0,0,0,.08);
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height:100vh; }
+
+  .container { max-width: 480px; margin: 0 auto; padding: 16px; }
+
+  /* Header */
+  .header { text-align: center; padding: 24px 0 16px; }
+  .header h1 { font-size: 22px; font-weight: 700; }
+  .header p { color: var(--sub); font-size: 13px; margin-top: 4px; }
+
+  /* Selector */
+  .selector { background: var(--card); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); margin-bottom: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .selector label { font-size: 13px; font-weight: 600; color: var(--sub); }
+  .selector select, .selector input { width: 100%; padding: 10px 12px; border: 1.5px solid #e5e7eb; border-radius: 10px; font-size: 15px; background: #fafafa; color: var(--text); outline: none; transition: border .2s; }
+  .selector select:focus, .selector input:focus { border-color: var(--c1); }
+  .selector .row { display: flex; gap: 10px; }
+  .selector .row > * { flex: 1; }
+
+  /* Buttons */
+  .btn { display: block; width: 100%; padding: 14px; border: none; border-radius: var(--radius); font-size: 16px; font-weight: 600; cursor: pointer; transition: opacity .2s, transform .1s; color: #fff; background: var(--c1); }
+  .btn:active { transform: scale(.97); }
+  .btn:disabled { opacity: .5; pointer-events: none; }
+  .btn-sm { padding: 8px 16px; font-size: 13px; border-radius: 8px; width: auto; display: inline-block; }
+
+  /* Question card */
+  .q-card { background: var(--card); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); margin-bottom: 12px; }
+  .q-number { display: inline-block; background: var(--c1); color: #fff; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 99px; margin-bottom: 10px; }
+  .q-content { font-size: 15px; line-height: 1.7; margin-bottom: 14px; font-weight: 500; }
+
+  /* Options */
+  .option { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border: 1.5px solid #e5e7eb; border-radius: 10px; margin-bottom: 8px; cursor: pointer; transition: all .15s; font-size: 14px; }
+  .option:active { background: #f0f0ff; }
+  .option.selected { border-color: var(--c1); background: #eef0ff; }
+  .option.correct { border-color: var(--ok); background: #dcfce7; }
+  .option.wrong { border-color: var(--err); background: #fee2e2; }
+  .option .key { width: 28px; height: 28px; border-radius: 50%; background: #f3f4f6; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; flex-shrink: 0; }
+  .option.selected .key { background: var(--c1); color: #fff; }
+  .option.correct .key { background: var(--ok); color: #fff; }
+  .option.wrong .key { background: var(--err); color: #fff; }
+
+  /* Analysis */
+  .analysis { margin-top: 12px; padding: 12px; background: #fffbeb; border-radius: 10px; font-size: 13px; line-height: 1.6; color: #92400e; display: none; }
+  .analysis.show { display: block; }
+
+  /* Score bar */
+  .score-bar { background: var(--card); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); margin-bottom: 16px; text-align: center; }
+  .score-bar .score { font-size: 36px; font-weight: 800; color: var(--c1); }
+  .score-bar .label { font-size: 13px; color: var(--sub); }
+
+  /* Wrong book */
+  .wrong-book { background: var(--card); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); margin-top: 16px; }
+  .wrong-book h3 { font-size: 15px; margin-bottom: 10px; }
+  .wrong-book .item { padding: 10px 0; border-bottom: 1px solid #f3f4f6; font-size: 13px; line-height: 1.5; }
+  .wrong-book .item:last-child { border-bottom: none; }
+  .wrong-book .empty { color: var(--sub); font-size: 13px; text-align: center; padding: 20px; }
+
+  /* States */
+  .loading { text-align: center; padding: 40px; }
+  .spinner { width: 36px; height: 36px; border: 3px solid #e5e7eb; border-top-color: var(--c1); border-radius: 50%; animation: spin .8s linear infinite; margin: 0 auto 12px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading p { color: var(--sub); font-size: 14px; }
+  .error-toast { background: #fee2e2; color: #991b1b; padding: 12px 16px; border-radius: 10px; font-size: 13px; margin-bottom: 12px; display: none; }
+  .error-toast.show { display: block; }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .tab { flex: 1; padding: 10px; text-align: center; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; background: var(--card); color: var(--sub); box-shadow: var(--shadow); transition: all .15s; }
+  .tab.active { background: var(--c1); color: #fff; }
+
+  /* Footer */
+  .footer { text-align: center; padding: 20px; color: #ccc; font-size: 11px; }
+  .clear-btn { color: var(--sub); font-size: 12px; cursor: pointer; background: none; border: none; margin-top: 8px; text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1>AI 刷题助手</h1>
+    <p>无需注册，打开即用 · 深度思考出题</p>
+  </div>
+
+  <div class="selector">
+    <div class="row">
+      <div>
+        <label>考试类型</label>
+        <select id="subject">
+          <option value="考研政治">考研政治</option>
+          <option value="考研英语">考研英语</option>
+          <option value="考研数学">考研数学</option>
+          <option value="公务员行测">公务员行测</option>
+          <option value="计算机408">计算机408</option>
+        </select>
+      </div>
+      <div>
+        <label>题目数量</label>
+        <select id="count">
+          <option value="5">5题</option>
+          <option value="10">10题</option>
+          <option value="15">15题</option>
+        </select>
+      </div>
+    </div>
+    <div>
+      <label>章节（可选，不填则随机抽题）</label>
+      <input type="text" id="chapter" placeholder="例：辩证法、极限与连续、阅读理解">
+    </div>
+    <button class="btn" id="startBtn" onclick="startQuiz()">开始刷题</button>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" id="tabQuiz" onclick="switchTab('quiz')">当前题目</div>
+    <div class="tab" id="tabWrong" onclick="switchTab('wrong')">错题本</div>
+  </div>
+
+  <div class="error-toast" id="errorToast"></div>
+
+  <div id="mainArea">
+    <div style="text-align:center; padding:60px 20px; color:var(--sub);">
+      <div style="font-size:48px; margin-bottom:12px;">📝</div>
+      <p>选择科目和章节，AI 即刻出题</p>
+    </div>
+  </div>
+
+  <div class="footer">Powered by DeepSeek · 题目由AI生成，仅供参考</div>
+</div>
+
+<script>
+let questions = [], userAnswers = {}, submitted = false, tab = 'quiz';
+
+function switchTab(t) {
+  tab = t;
+  document.getElementById('tabQuiz').classList.toggle('active', t === 'quiz');
+  document.getElementById('tabWrong').classList.toggle('active', t === 'wrong');
+  render();
+}
+
+async function startQuiz() {
+  const subject = document.getElementById('subject').value;
+  const chapter = document.getElementById('chapter').value.trim();
+  const count = parseInt(document.getElementById('count').value);
+
+  document.getElementById('startBtn').disabled = true;
+  document.getElementById('startBtn').textContent = 'AI出题中...';
+  document.getElementById('mainArea').innerHTML = '<div class="loading"><div class="spinner"></div><p>AI 正在出题，请稍候...</p></div>';
+  hideError();
+
+  try {
+    const res = await fetch('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subject, chapter, count }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '请求失败');
+
+    questions = data.questions;
+    userAnswers = {};
+    submitted = false;
+    tab = 'quiz';
+    document.getElementById('tabQuiz').classList.add('active');
+    document.getElementById('tabWrong').classList.remove('active');
+    render();
+  } catch (err) {
+    showError(err.message || '出题失败，请重试');
+    document.getElementById('mainArea').innerHTML = '<div style="text-align:center;padding:60px 20px;color:var(--sub);"><p>出题失败，请重试</p></div>';
+  } finally {
+    document.getElementById('startBtn').disabled = false;
+    document.getElementById('startBtn').textContent = '开始刷题';
+  }
+}
+
+function select(qid, key) {
+  if (submitted) return;
+  userAnswers[qid] = key;
+  render();
+}
+
+function submitQuiz() {
+  submitted = true;
+  // Save wrong answers
+  const wrongBook = JSON.parse(localStorage.getItem('wrongBook') || '[]');
+  questions.forEach(q => {
+    if (userAnswers[q.id] !== q.answer) {
+      wrongBook.push({
+        subject: document.getElementById('subject').value,
+        content: q.content,
+        options: q.options,
+        myAnswer: userAnswers[q.id] || '未作答',
+        correctAnswer: q.answer,
+        analysis: q.analysis,
+        time: new Date().toLocaleString(),
+      });
+    }
+  });
+  localStorage.setItem('wrongBook', JSON.stringify(wrongBook));
+  render();
+}
+
+function clearWrongBook() {
+  if (confirm('确定清除所有错题记录？')) {
+    localStorage.removeItem('wrongBook');
+    render();
+  }
+}
+
+function render() {
+  const area = document.getElementById('mainArea');
+
+  if (tab === 'wrong') {
+    const wrongBook = JSON.parse(localStorage.getItem('wrongBook') || '[]');
+    if (wrongBook.length === 0) {
+      area.innerHTML = '<div class="wrong-book"><h3>错题本</h3><div class="empty">暂无错题，继续加油！</div></div>';
+      return;
+    }
+    area.innerHTML = `<div class="wrong-book">
+      <h3>错题本 · ${wrongBook.length} 道错题</h3>
+      ${wrongBook.slice().reverse().map((w, i) => `
+        <div class="item">
+          <strong>#${wrongBook.length - i}</strong> [${w.subject}] ${w.content}<br>
+          你的答案：<span style="color:var(--err);font-weight:600">${w.myAnswer}</span>
+          &nbsp;正确：<span style="color:var(--ok);font-weight:600">${w.correctAnswer}</span><br>
+          <span style="color:var(--sub);">${w.analysis}</span>
+        </div>
+      `).join('')}
+      <button class="clear-btn" onclick="clearWrongBook()">清除错题记录</button>
+    </div>`;
+    return;
+  }
+
+  // Quiz tab
+  if (questions.length === 0) {
+    area.innerHTML = '<div style="text-align:center;padding:60px 20px;color:var(--sub);"><div style="font-size:48px;margin-bottom:12px;">📝</div><p>选择科目和章节，AI 即刻出题</p></div>';
+    return;
+  }
+
+  const answeredCount = Object.keys(userAnswers).length;
+  const total = questions.length;
+  let correctCount = 0;
+  if (submitted) {
+    questions.forEach(q => { if (userAnswers[q.id] === q.answer) correctCount++; });
+  }
+
+  let html = '';
+  if (submitted) {
+    html += `<div class="score-bar"><div class="score">${correctCount}/${total}</div><div class="label">正确率 ${Math.round(correctCount/total*100)}%</div></div>`;
+  }
+
+  questions.forEach((q, i) => {
+    const isSelected = (key) => userAnswers[q.id] === key;
+    const isCorrect = (key) => submitted && key === q.answer;
+    const isWrong = (key) => submitted && userAnswers[q.id] === key && key !== q.answer;
+
+    html += `<div class="q-card">
+      <span class="q-number">第 ${i+1} 题</span>
+      <div class="q-content">${q.content}</div>
+      ${q.options.map(o => `
+        <div class="option ${isSelected(o.key) ? 'selected' : ''} ${isCorrect(o.key) ? 'correct' : ''} ${isWrong(o.key) ? 'wrong' : ''}"
+             onclick="select(${q.id}, '${o.key}')">
+          <span class="key">${o.key}</span>
+          <span>${o.text}</span>
+        </div>
+      `).join('')}
+      <div class="analysis ${submitted ? 'show' : ''}">
+        <strong>正确答案：${q.answer}</strong><br>${q.analysis}
+      </div>
+    </div>`;
+  });
+
+  if (!submitted) {
+    html += `<button class="btn" onclick="submitQuiz()" style="margin-top:8px;" ${answeredCount < total ? 'disabled' : ''}>
+      ${answeredCount < total ? `已答 ${answeredCount}/${total} 题（需全部答完）` : '交卷'}
+    </button>`;
+  } else {
+    html += `<button class="btn" onclick="startQuiz()" style="margin-top:8px;">再来一轮</button>`;
+  }
+
+  area.innerHTML = html;
+}
+
+function showError(msg) {
+  const el = document.getElementById('errorToast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 4000);
+}
+function hideError() {
+  document.getElementById('errorToast').classList.remove('show');
+}
+</script>
+</body>
+</html>
