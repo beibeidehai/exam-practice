@@ -1,7 +1,12 @@
 {
   "functions": {
-    "api/generate.js": {
+    "api/interview.js": {
       "maxDuration": 30
     }
-  }
+  },
+  "rewrites": [
+    { "source": "/api/start", "destination": "/api/interview" },
+    { "source": "/api/answer", "destination": "/api/interview" },
+    { "source": "/api/interrupt", "destination": "/api/interview" }
+  ]
 }

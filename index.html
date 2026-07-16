@@ -7,23 +7,23 @@
 <style>
   :root {
     --c1: #6366f1; --c2: #818cf8; --bg: #f5f5f7; --card: #fff;
-    --text: #1e1e2e; --sub: #6b7280; --ok: #22c55e; --warn: #f59e0b;
+    --text: #1e1e2e; --sub: #6b7280; --ok: #22c55e; --err: #ef4444; --warn: #f59e0b;
     --radius: 14px; --shadow: 0 1px 3px rgba(0,0,0,.08);
   }
   * { margin:0; padding:0; box-sizing:border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height:100vh; }
 
-  .container { max-width: 500px; margin: 0 auto; padding: 16px; }
+  .container { max-width: 500px; margin: 0 auto; padding: 16px; padding-bottom: 120px; }
 
   .header { text-align: center; padding: 24px 0 8px; }
   .header h1 { font-size: 22px; font-weight: 700; }
   .header p { color: var(--sub); font-size: 13px; margin-top: 4px; }
 
-  /* Setup card */
+  /* ── Setup ── */
   .setup { background: var(--card); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); margin: 16px 0; display: flex; flex-direction: column; gap: 10px; }
   .setup label { font-size: 13px; font-weight: 600; color: var(--sub); }
   .setup select, .setup input { width: 100%; padding: 10px 12px; border: 1.5px solid #e5e7eb; border-radius: 10px; font-size: 15px; background: #fafafa; color: var(--text); outline: none; }
-  .setup select:focus, .setup input:focus { border-color: var(--c1); }
+  .setup select:focus { border-color: var(--c1); }
   .setup .row { display: flex; gap: 10px; }
   .setup .row > * { flex: 1; }
 
@@ -31,8 +31,15 @@
   .btn:active { transform: scale(.97); }
   .btn:disabled { opacity: .5; pointer-events: none; }
 
-  /* Chat area */
-  .chat { margin: 16px 0; }
+  /* ── TTS toggle ── */
+  .tts-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--card); border-radius: 10px; font-size: 12px; color: var(--sub); margin-bottom: 12px; box-shadow: var(--shadow); }
+  .tts-bar .toggle { width: 44px; height: 24px; border-radius: 12px; background: #d1d5db; cursor: pointer; position: relative; transition: background .2s; flex-shrink: 0; }
+  .tts-bar .toggle.on { background: var(--c1); }
+  .tts-bar .toggle::after { content:''; position:absolute; top:2px; left:2px; width:20px; height:20px; border-radius:50%; background:#fff; transition:transform .2s; }
+  .tts-bar .toggle.on::after { transform:translateX(20px); }
+
+  /* ── Chat ── */
+  .chat { margin-bottom: 16px; }
   .msg { margin-bottom: 12px; display: flex; gap: 8px; }
   .msg.user { flex-direction: row-reverse; }
   .msg .avatar { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; background: #f3f4f6; }
@@ -41,33 +48,50 @@
   .msg .bubble { max-width: 80%; padding: 12px 16px; border-radius: 16px; font-size: 14px; line-height: 1.6; word-break: break-word; }
   .msg.assistant .bubble { background: var(--card); box-shadow: var(--shadow); border-bottom-left-radius: 4px; }
   .msg.user .bubble { background: var(--c1); color: #fff; border-bottom-right-radius: 4px; }
-  .msg .bubble .meta { font-size: 11px; color: var(--sub); margin-top: 6px; }
+  .msg .bubble .label { font-size: 10px; opacity:.6; margin-bottom:4px; text-transform:uppercase; letter-spacing:.5px; }
 
-  /* Input area */
-  .input-area { background: var(--card); border-radius: var(--radius); padding: 12px; box-shadow: var(--shadow); display: flex; gap: 8px; position: sticky; bottom: 16px; }
-  .input-area textarea { flex: 1; border: 1.5px solid #e5e7eb; border-radius: 10px; padding: 10px 12px; font-size: 14px; resize: none; height: 48px; outline: none; font-family: inherit; }
-  .input-area textarea:focus { border-color: var(--c1); }
-  .input-area .send-btn { width: 48px; height: 48px; border-radius: 50%; border: none; background: var(--c1); color: #fff; font-size: 20px; cursor: pointer; flex-shrink: 0; display: flex; align-items: center; justify-content: center; transition: opacity .2s; }
-  .input-area .send-btn:disabled { opacity: .4; }
-  .input-area .end-btn { padding: 0 14px; height: 48px; border-radius: 10px; border: 1.5px solid #fca5a5; background: #fef2f2; color: #dc2626; font-size: 13px; cursor: pointer; white-space: nowrap; }
+  /* ── Recording panel ── */
+  .rec-panel { background: var(--card); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); margin-bottom: 12px; position: sticky; bottom: 16px; }
+  .rec-panel .timer-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .rec-panel .timer { font-size: 28px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--err); }
+  .rec-panel .timer.warn { animation: pulse .5s ease-in-out infinite alternate; }
+  @keyframes pulse { to { opacity:.4; } }
+  .rec-panel .wave { flex:1; height:32px; display:flex; align-items:center; gap:2px; }
+  .rec-panel .wave .bar { flex:1; background:var(--c1); border-radius:2px; animation:wave 1.2s ease-in-out infinite alternate; }
+  .rec-panel .wave .bar:nth-child(2) { animation-delay:.1s; } .rec-panel .wave .bar:nth-child(3) { animation-delay:.2s; }
+  .rec-panel .wave .bar:nth-child(4) { animation-delay:.3s; } .rec-panel .wave .bar:nth-child(5) { animation-delay:.4s; }
+  @keyframes wave { 0%{height:8px} 100%{height:28px} }
+  .rec-panel .live-text { font-size: 14px; line-height: 1.5; color: var(--sub); min-height: 36px; padding: 8px; background: #f9fafb; border-radius: 8px; margin-bottom: 10px; max-height: 120px; overflow-y: auto; white-space: pre-wrap; font-style: italic; }
+  .rec-panel .btn-row { display: flex; gap: 8px; }
+  .rec-panel .btn-row button { flex:1; padding: 12px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; border: none; transition: opacity .2s; }
+  .rec-start { background: var(--err); color: #fff; }
+  .rec-stop { background: var(--ok); color: #fff; }
+  .rec-interrupt { background: var(--warn); color: #fff; }
 
-  /* Score panel */
+  .mic-deny { text-align: center; padding: 12px; color: var(--sub); font-size: 13px; }
+  .mic-deny textarea { width: 100%; margin-top: 8px; padding: 10px; border: 1.5px solid #e5e7eb; border-radius: 10px; font-size: 14px; resize: vertical; min-height: 80px; font-family: inherit; }
+
+  /* ── Score card ── */
   .score-card { background: var(--card); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); margin: 16px 0; }
   .score-card h2 { text-align: center; margin-bottom: 16px; }
   .score-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
   .score-item { text-align: center; padding: 12px; background: #f9fafb; border-radius: 10px; }
-  .score-item .num { font-size: 28px; font-weight: 800; color: var(--c1); }
-  .score-item .tag { font-size: 12px; color: var(--sub); margin-top: 2px; }
+  .score-item .num { font-size: 26px; font-weight: 800; color: var(--c1); }
+  .score-item .tag { font-size: 11px; color: var(--sub); margin-top: 2px; }
+  .fluency-detail { font-size: 11px; color: var(--sub); margin-top: 4px; line-height: 1.4; }
   .total-score { text-align: center; font-size: 20px; font-weight: 700; padding: 10px; }
   .summary { font-size: 14px; line-height: 1.6; color: var(--sub); margin-bottom: 10px; padding: 12px; background: #f9fafb; border-radius: 10px; }
   .tips { font-size: 13px; color: var(--warn); line-height: 1.8; }
   .tips li { margin-left: 16px; }
 
-  /* Loading */
-  .typing { display: flex; gap: 4px; padding: 4px 0; }
+  /* ── Interrupt banner ── */
+  .interrupt-banner { background: #fef3c7; border: 1px solid #fcd34d; border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; font-size: 13px; color: #92400e; display: none; animation: slideIn .3s ease-out; }
+  .interrupt-banner.show { display: block; }
+  @keyframes slideIn { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
+
+  .typing { display: flex; gap: 4px; padding: 8px 0; }
   .typing span { width: 6px; height: 6px; border-radius: 50%; background: #ccc; animation: bounce 1.4s infinite ease-in-out both; }
-  .typing span:nth-child(1) { animation-delay: -0.32s; }
-  .typing span:nth-child(2) { animation-delay: -0.16s; }
+  .typing span:nth-child(1) { animation-delay: -0.32s; } .typing span:nth-child(2) { animation-delay: -0.16s; }
   @keyframes bounce { 0%,80%,100% { transform: scale(0); } 40% { transform: scale(1); } }
 
   .footer { text-align: center; padding: 20px; color: #ccc; font-size: 11px; }
@@ -77,26 +101,31 @@
 <div class="container">
   <div class="header">
     <h1>AI 面试官</h1>
-    <p>选择岗位，开始模拟面试 · AI追问 & 多维评分</p>
+    <p>语音交互 · 实时打断 · 多维评分</p>
   </div>
 
+  <!-- ── Setup ── -->
   <div id="setupArea" class="setup">
-    <div class="row">
-      <div>
-        <label>目标岗位</label>
-        <select id="roleSelect">
-          <option value="互联网产品经理">产品经理</option>
+    <div>
+      <label>面试场景</label>
+      <select id="roleSelect" onchange="onRoleChange()">
+        <optgroup label="-- 考研复试 --">
+          <option value="考研复试-综合面试">考研复试 · 综合面试</option>
+          <option value="考研复试-英语口语">考研复试 · 英语口语</option>
+          <option value="考研复试-专业综合">考研复试 · 专业综合</option>
+        </optgroup>
+        <optgroup label="-- 求职面试 --">
+          <option value="产品经理">产品经理</option>
           <option value="Java后端开发工程师">Java后端开发</option>
           <option value="前端开发工程师">前端开发</option>
           <option value="数据分析师">数据分析师</option>
           <option value="算法工程师">算法工程师</option>
-          <option value="软件测试工程师">测试工程师</option>
-          <option value="运营经理">运营经理</option>
-          <option value="市场营销经理">市场营销</option>
-        </select>
-      </div>
+        </optgroup>
+      </select>
+    </div>
+    <div class="row">
       <div>
-        <label>面试难度</label>
+        <label>难度</label>
         <select id="difficultySelect">
           <option value="校招/实习">校招/实习</option>
           <option value="社招1-3年">社招1-3年</option>
@@ -106,17 +135,40 @@
       </div>
     </div>
     <button class="btn" id="startBtn" onclick="startInterview()">开始面试</button>
+    <p style="font-size:11px;color:var(--sub);text-align:center;">需要使用麦克风，建议在 Chrome/Edge 浏览器打开</p>
   </div>
 
+  <!-- ── TTS toggle ── -->
+  <div class="tts-bar" id="ttsBar" style="display:none;">
+    <span>🔊 AI语音播报</span>
+    <div class="toggle on" id="ttsToggle" onclick="toggleTTS()"></div>
+  </div>
+
+  <!-- ── Interrupt banner ── -->
+  <div class="interrupt-banner" id="interruptBanner"></div>
+
+  <!-- ── Chat ── -->
   <div id="chatArea" class="chat" style="display:none;"></div>
-  <div id="typingArea" style="display:none;padding:0 16px 16px;" class="typing"><span></span><span></span><span></span></div>
+  <div id="typingArea" style="display:none;padding:0 0 16px;" class="typing"><span></span><span></span><span></span></div>
 
-  <div id="inputArea" class="input-area" style="display:none;">
-    <textarea id="answerInput" placeholder="输入你的回答..." rows="1"></textarea>
-    <button class="send-btn" id="sendBtn" onclick="sendAnswer()" disabled>></button>
-    <button class="end-btn" onclick="endInterview()">结束</button>
+  <!-- ── Recording panel ── -->
+  <div class="rec-panel" id="recPanel" style="display:none;">
+    <div class="timer-row">
+      <div class="timer" id="recTimer">00:00</div>
+      <div class="wave" id="waveBox"><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span></div>
+    </div>
+    <div class="live-text" id="liveText">点击开始回答...</div>
+    <div class="btn-row" id="recBtnRow">
+      <button class="rec-start" id="btnStartRec" onclick="startRecording()">开始回答</button>
+    </div>
+    <div class="mic-deny" id="micDeny" style="display:none;">
+      <p>麦克风不可用（或不支持语音），请打字回答：</p>
+      <textarea id="textFallback" placeholder="输入你的回答..."></textarea>
+      <button class="btn" onclick="sendTextFallback()" style="margin-top:8px;">发送</button>
+    </div>
   </div>
 
+  <!-- ── Score ── -->
   <div id="scoreArea"></div>
   <div id="restartArea" style="text-align:center;display:none;">
     <button class="btn" onclick="location.reload()" style="margin-top:16px;">重新开始</button>
@@ -126,13 +178,186 @@
 </div>
 
 <script>
-let sid = null, waiting = false;
+// ── State ──
+let sid = null, waiting = false, ttsOn = true;
+let recognition = null, recTimer = null, recSeconds = 0, finalTranscript = '';
+let interruptCheckInterval = null;
+const MAX_REC_SEC = 90, INTERRUPT_CHECK_SEC = 8;
 
+// ── TTS ──
+function speak(text) {
+  if (!ttsOn || !window.speechSynthesis) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = document.getElementById('roleSelect').value.includes('英语') ? 'en-US' : 'zh-CN';
+  u.rate = 0.95;
+  u.pitch = 1;
+  // Pick a good voice
+  const voices = speechSynthesis.getVoices();
+  const preferred = voices.find(v => v.lang.startsWith(u.lang) && v.name.includes('Female')) || voices.find(v => v.lang.startsWith(u.lang));
+  if (preferred) u.voice = preferred;
+  speechSynthesis.speak(u);
+}
+function toggleTTS() {
+  ttsOn = !ttsOn;
+  document.getElementById('ttsToggle').classList.toggle('on', ttsOn);
+  if (!ttsOn) speechSynthesis.cancel();
+}
+
+// ── Speech Recognition ──
+function initSpeech() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) return null;
+  const rec = new SpeechRecognition();
+  rec.lang = document.getElementById('roleSelect').value.includes('英语') ? 'en-US' : 'zh-CN';
+  rec.interimResults = true;
+  rec.continuous = true;
+  rec.maxAlternatives = 1;
+
+  rec.onresult = (e) => {
+    let interim = '', final = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) final += e.results[i][0].transcript;
+      else interim += e.results[i][0].transcript;
+    }
+    if (final) finalTranscript += final;
+    document.getElementById('liveText').textContent = finalTranscript + interim;
+    document.getElementById('liveText').style.fontStyle = interim ? 'italic' : 'normal';
+  };
+
+  rec.onerror = (e) => {
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+      stopRecording(true);
+      document.getElementById('micDeny').style.display = 'block';
+      document.getElementById('btnStartRec').style.display = 'none';
+    }
+  };
+
+  rec.onend = () => {
+    // If we didn't manually stop, restart (continuous mode quirk)
+    if (recognition && recSeconds < MAX_REC_SEC) {
+      try { recognition.start(); } catch (_) {}
+    }
+  };
+
+  return rec;
+}
+
+function startRecording() {
+  if (!recognition) recognition = initSpeech();
+  if (!recognition) {
+    document.getElementById('micDeny').style.display = 'block';
+    document.getElementById('btnStartRec').style.display = 'none';
+    return;
+  }
+
+  finalTranscript = '';
+  recSeconds = 0;
+  document.getElementById('liveText').textContent = '正在聆听...';
+  document.getElementById('liveText').style.fontStyle = 'italic';
+  document.getElementById('recTimer').textContent = '00:00';
+  document.getElementById('recTimer').classList.remove('warn');
+  document.getElementById('waveBox').style.display = 'flex';
+
+  document.getElementById('btnRow').innerHTML = `
+    <button class="rec-interrupt" onclick="interruptRecording()">打断</button>
+    <button class="rec-stop" onclick="stopRecording()">回答完毕</button>
+  `;
+
+  try { recognition.start(); } catch (_) {}
+
+  recTimer = setInterval(() => {
+    recSeconds++;
+    const m = String(Math.floor(recSeconds / 60)).padStart(2, '0');
+    const s = String(recSeconds % 60).padStart(2, '0');
+    document.getElementById('recTimer').textContent = `${m}:${s}`;
+    if (recSeconds >= MAX_REC_SEC - 10) document.getElementById('recTimer').classList.add('warn');
+    if (recSeconds >= MAX_REC_SEC) interruptRecording('回答时间到，请精简表达。');
+  }, 1000);
+
+  // Periodic interrupt check
+  interruptCheckInterval = setInterval(() => {
+    if (!sid || !finalTranscript || finalTranscript.length < 40) return;
+    fetch('/api/interrupt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sid, text: finalTranscript }),
+    }).then(r => r.json()).then(d => {
+      if (d.interrupt) interruptRecording(d.msg || d.reason);
+    }).catch(() => {});
+  }, INTERRUPT_CHECK_SEC * 1000);
+}
+
+async function stopRecording(silent) {
+  clearInterval(recTimer);
+  clearInterval(interruptCheckInterval);
+  if (recognition) {
+    try { recognition.stop(); } catch (_) {}
+  }
+  document.getElementById('waveBox').style.display = 'none';
+  document.getElementById('btnRow').innerHTML = `<button class="rec-start" id="btnStartRec" onclick="startRecording()">开始回答</button>`;
+
+  const text = finalTranscript.trim();
+  if (!text && !silent) return; // nothing recorded
+
+  if (text) {
+    addMsg('user', text);
+    document.getElementById('liveText').textContent = '点击开始回答...';
+    document.getElementById('liveText').style.fontStyle = 'italic';
+    document.getElementById('recTimer').textContent = '00:00';
+    document.getElementById('recTimer').classList.remove('warn');
+    hideInterruptBanner();
+    await submitAnswer(text);
+  }
+}
+
+async function interruptRecording(msg) {
+  clearInterval(recTimer);
+  clearInterval(interruptCheckInterval);
+  if (recognition) {
+    try { recognition.stop(); } catch (_) {}
+  }
+  document.getElementById('waveBox').style.display = 'none';
+  document.getElementById('btnRow').innerHTML = `<button class="rec-start" id="btnStartRec" onclick="startRecording()">开始回答</button>`;
+  document.getElementById('recTimer').textContent = '00:00';
+  document.getElementById('recTimer').classList.remove('warn');
+
+  const text = finalTranscript.trim();
+  if (text) addMsg('user', text);
+  document.getElementById('liveText').textContent = '点击开始回答...';
+  document.getElementById('liveText').style.fontStyle = 'italic';
+
+  hideInterruptBanner();
+  await submitAnswer(text || '（被打断）');
+}
+
+function showInterruptBanner(msg) {
+  const b = document.getElementById('interruptBanner');
+  b.textContent = '面试官：' + (msg || '请精简回答');
+  b.classList.add('show');
+  setTimeout(() => hideInterruptBanner(), 5000);
+}
+function hideInterruptBanner() {
+  document.getElementById('interruptBanner').classList.remove('show');
+}
+
+async function sendTextFallback() {
+  const text = document.getElementById('textFallback').value.trim();
+  if (!text) return;
+  document.getElementById('textFallback').value = '';
+  addMsg('user', text);
+  await submitAnswer(text);
+}
+
+// ── Core interview flow ──
 async function startInterview() {
   const role = document.getElementById('roleSelect').value;
   const difficulty = document.getElementById('difficultySelect').value;
   const btn = document.getElementById('startBtn');
   btn.disabled = true; btn.textContent = 'AI面试官准备中...';
+
+  // Init speech
+  recognition = initSpeech();
 
   try {
     const res = await fetch('/api/start', {
@@ -145,26 +370,22 @@ async function startInterview() {
 
     sid = data.sid;
     document.getElementById('setupArea').style.display = 'none';
+    document.getElementById('ttsBar').style.display = 'flex';
     document.getElementById('chatArea').style.display = 'block';
-    document.getElementById('inputArea').style.display = 'flex';
+    document.getElementById('recPanel').style.display = 'block';
     addMsg('assistant', data.reply);
-    enableInput();
+    speak(data.reply);
   } catch (e) {
     alert('启动失败: ' + e.message);
     btn.disabled = false; btn.textContent = '开始面试';
   }
 }
 
-async function sendAnswer() {
+async function submitAnswer(text) {
   if (waiting) return;
-  const input = document.getElementById('answerInput');
-  const text = input.value.trim();
-  if (!text) return;
-
-  addMsg('user', text);
-  input.value = '';
-  disableInput();
+  waiting = true;
   showTyping();
+  disableRecBtns();
 
   try {
     const res = await fetch('/api/answer', {
@@ -178,85 +399,87 @@ async function sendAnswer() {
     hideTyping();
 
     if (data.done) {
-      document.getElementById('inputArea').style.display = 'none';
+      document.getElementById('recPanel').style.display = 'none';
       document.getElementById('restartArea').style.display = 'block';
       showScore(data.evaluation);
+      if (ttsOn) speak('面试结束。' + (data.evaluation['总结'] || ''));
     } else {
       addMsg('assistant', data.reply);
-      enableInput();
+      speak(data.reply);
+      enableRecBtns();
     }
   } catch (e) {
     hideTyping();
     addMsg('assistant', '抱歉，出了点问题，请重试。');
-    enableInput();
+    enableRecBtns();
+  } finally {
+    waiting = false;
   }
 }
 
-async function endInterview() {
-  if (waiting) return;
-  disableInput();
-  showTyping();
-  try {
-    const res = await fetch('/api/answer', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sid, answer: '结束面试' }),
-    });
-    const data = await res.json();
-    hideTyping();
-    document.getElementById('inputArea').style.display = 'none';
-    document.getElementById('restartArea').style.display = 'block';
-    if (data.done && data.evaluation) showScore(data.evaluation);
-  } catch (e) {
-    hideTyping();
-    location.reload();
+function onRoleChange() {
+  if (recognition) {
+    recognition.lang = document.getElementById('roleSelect').value.includes('英语') ? 'en-US' : 'zh-CN';
   }
 }
 
+// ── UI helpers ──
 function addMsg(role, text) {
   const area = document.getElementById('chatArea');
   const div = document.createElement('div');
   div.className = `msg ${role}`;
   const avatar = role === 'assistant' ? '🤖' : '👤';
-  div.innerHTML = `<div class="avatar">${avatar}</div><div class="bubble">${text.replace(/\n/g, '<br>')}</div>`;
+  const label = role === 'assistant' ? '面试官' : '你';
+  div.innerHTML = `<div class="avatar">${avatar}</div><div class="bubble"><div class="label">${label}</div>${text.replace(/\n/g, '<br>')}</div>`;
   area.appendChild(div);
   setTimeout(() => div.scrollIntoView({ behavior: 'smooth' }), 100);
 }
 
 function showScore(ev) {
-  const area = document.getElementById('scoreArea');
-  area.innerHTML = `<div class="score-card">
+  const dims = ev['专业能力'] !== undefined
+    ? [['专业能力', ev['专业能力']], ['逻辑表达', ev['逻辑表达']], ['语言流畅度', ev['语言流畅度']], ['临场应变', ev['临场应变']], ['沟通技巧', ev['沟通技巧']]]
+    : [['专业知识', ev['专业知识']], ['逻辑表达', ev['逻辑表达']], ['语言流畅度', ev['语言流畅度']], ['临场应变', ev['临场应变']], ['沟通技巧', ev['沟通技巧']]];
+
+  const flu = ev._fluency;
+  const fluencyExtra = flu
+    ? `<div class="fluency-detail">总字数${flu.totalChars} · 填充词比${flu.fillerRatio}% · 语速${flu.wpm}字/分</div>`
+    : '';
+
+  document.getElementById('scoreArea').innerHTML = `<div class="score-card">
     <h2>面试评估报告</h2>
     <div class="score-grid">
-      <div class="score-item"><div class="num">${ev['专业能力']||'-'}</div><div class="tag">专业能力</div></div>
-      <div class="score-item"><div class="num">${ev['逻辑表达']||'-'}</div><div class="tag">逻辑表达</div></div>
-      <div class="score-item"><div class="num">${ev['沟通技巧']||'-'}</div><div class="tag">沟通技巧</div></div>
-      <div class="score-item"><div class="num">${ev['临场应变']||'-'}</div><div class="tag">临场应变</div></div>
+      ${dims.map(([tag, num]) => `<div class="score-item">
+        <div class="num">${num||'-'}</div>
+        <div class="tag">${tag}</div>
+        ${tag === '语言流畅度' ? fluencyExtra : ''}
+      </div>`).join('')}
     </div>
-    <div class="total-score">总分：${ev['总分']||'-'} / 40</div>
+    <div class="total-score">总分：${ev['总分']||'-'} / 50</div>
     <div class="summary">${ev['总结']||''}</div>
     ${ev['建议'] ? '<ul class="tips">'+ev['建议'].map(t=>'<li>'+t+'</li>').join('')+'</ul>' : ''}
   </div>`;
-  setTimeout(() => area.scrollIntoView({ behavior: 'smooth' }), 200);
+  setTimeout(() => document.getElementById('scoreArea').scrollIntoView({ behavior: 'smooth' }), 200);
 }
 
 function showTyping() { document.getElementById('typingArea').style.display = 'flex'; }
 function hideTyping() { document.getElementById('typingArea').style.display = 'none'; }
-function disableInput() {
-  waiting = true;
-  document.getElementById('sendBtn').disabled = true;
-  document.getElementById('answerInput').disabled = true;
+function disableRecBtns() {
+  document.querySelectorAll('#recBtnRow button').forEach(b => b.disabled = true);
 }
-function enableInput() {
-  waiting = false;
-  document.getElementById('sendBtn').disabled = false;
-  document.getElementById('answerInput').disabled = false;
-  document.getElementById('answerInput').focus();
+function enableRecBtns() {
+  document.querySelectorAll('#recBtnRow button').forEach(b => b.disabled = false);
 }
 
-document.getElementById('answerInput').addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAnswer(); }
+// Enter key in fallback textarea
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey && document.activeElement === document.getElementById('textFallback')) {
+    e.preventDefault();
+    sendTextFallback();
+  }
 });
+
+// Load voices
+if (window.speechSynthesis) speechSynthesis.getVoices();
 </script>
 </body>
 </html>
