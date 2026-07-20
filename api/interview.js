@@ -6,6 +6,33 @@ const TtsClient = tencentcloud.tts.v20190823.Client;
 
 const FILLER_WORDS = ['嗯', '啊', '呃', '额', '那个', '然后', '就是', '就是说', '这个', '怎么说呢', '其实', '反正', '对吧', '你懂吧'];
 const MAX_ANSWER_LEN = 600;
+const MAX_BODY = 50_000;
+const SESSION_TTL = 30 * 60 * 1000;
+const RATE_WINDOW = 60_000;
+const RATE_MAX = 30;
+const ALLOWED_ROLES = ['考研复试-综合面试','考研复试-英语口语','考研复试-专业综合','产品经理','Java后端开发工程师','前端开发工程师','数据分析师','算法工程师'];
+const ALLOWED_DIFFICULTIES = ['校招/实习','社招1-3年','社招3-5年','大厂高级'];
+
+const rateMap = {};
+function rateLimiter(ip) {
+  const now = Date.now();
+  const entry = rateMap[ip] || { count: 0, reset: now + RATE_WINDOW };
+  if (now > entry.reset) { entry.count = 0; entry.reset = now + RATE_WINDOW; }
+  entry.count++;
+  rateMap[ip] = entry;
+  return entry.count <= RATE_MAX;
+}
+
+function sanitize(s) {
+  return String(s).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').slice(0, 2000);
+}
+
+function cleanSession(sessions) {
+  const now = Date.now();
+  for (const k of Object.keys(sessions)) {
+    if (now - sessions[k]._created > SESSION_TTL) delete sessions[k];
+  }
+}
 
 // In-memory sessions (survives between warm calls, resets on cold start — fine for MVP)
 const sessions = {};
@@ -136,15 +163,29 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
 
   const url = req.url || '';
+  const ip = req.headers['x-forwarded-for'] || 'unknown';
+
+  if (req.method === 'POST' && !rateLimiter(ip)) {
+    return res.status(429).json({ error: 'Too many requests' });
+  }
+
+  // Body size guard
+  const contentLength = parseInt(req.headers['content-length'] || '0', 10);
+  if (contentLength > MAX_BODY) {
+    return res.status(413).json({ error: 'Body too large' });
+  }
+
+  cleanSession(sessions);
 
   try {
     // /api/start
     if (url.includes('/api/start')) {
       const { role, difficulty } = req.body || {};
-      if (!role) return res.status(400).json({ error: 'Missing role' });
-      const sid = Date.now().toString(36);
+      if (!role || !ALLOWED_ROLES.includes(role)) return res.status(400).json({ error: 'Invalid role' });
+      if (difficulty && !ALLOWED_DIFFICULTIES.includes(difficulty)) return res.status(400).json({ error: 'Invalid difficulty' });
+      const sid = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
       const msg = { role: 'system', content: buildSystemPrompt(role, difficulty) };
-      sessions[sid] = { role, difficulty, history: [msg], questionCount: 0, answers: [] };
+      sessions[sid] = { _created: Date.now(), role, difficulty, history: [msg], questionCount: 0, answers: [] };
 
       const result = await callDeepSeek(sessions[sid].history);
       const reply = result.choices[0].message.content;
@@ -157,14 +198,16 @@ export default async function handler(req, res) {
     // /api/answer
     if (url.includes('/api/answer')) {
       const { sid, answer } = req.body || {};
+      if (!sid || !answer) return res.status(400).json({ error: 'Missing sid or answer' });
       const s = sessions[sid];
       if (!s) return res.status(400).json({ error: 'Session expired' });
 
-      s.history.push({ role: 'user', content: answer });
-      s.answers.push(answer);
+      const clean = sanitize(answer);
+      s.history.push({ role: 'user', content: clean });
+      s.answers.push(clean);
       s.questionCount++;
 
-      if (s.questionCount >= 10 || answer.includes('结束面试')) {
+      if (s.questionCount >= 10 || clean.includes('结束面试')) {
         const fluency = calcFluency(s.answers);
         const historyText = s.history.map(m => `[${m.role}]: ${m.content}`).join('\n');
         const evalPrompt = buildEvalPrompt(s.role, historyText, fluency);
@@ -190,26 +233,28 @@ export default async function handler(req, res) {
       const s = sessions[sid];
       if (!s || !text) return res.json({ interrupt: false });
 
-      if (text.length > MAX_ANSWER_LEN) {
+      const clean = sanitize(text);
+
+      if (clean.length > MAX_ANSWER_LEN) {
         return res.json({ interrupt: true, reason: '回答超长', msg: '抱歉打断一下，你的回答有些长了，能否用一句话总结核心观点？' });
       }
 
       let fillerCount = 0;
       FILLER_WORDS.forEach(w => {
         const re = new RegExp(w, 'g');
-        const matches = text.match(re);
+        const matches = clean.match(re);
         if (matches) fillerCount += matches.length;
       });
-      if (text.length > 100 && fillerCount / text.length > 0.08) {
+      if (clean.length > 100 && fillerCount / clean.length > 0.08) {
         return res.json({ interrupt: true, reason: '填充词过多', msg: '我打断一下，注意到你用了比较多的语气词，试着放慢语速，想清楚再说。' });
       }
 
-      if (text.length > 80) {
-        const prompt = `你是面试官。候选人正在回答。当前转写："${text}"。判断是否明显偏题或逻辑混乱。回复"打断"或"继续"。`;
+      if (clean.length > 80) {
+        const prompt = `你是面试官。候选人正在回答。\n\n候选人说："""${clean.replace(/"/g, "'")}"""\n\n判断是否偏题或逻辑混乱。回复"打断"或"继续"。`;
         const result = await callDeepSeek([{ role: 'user', content: prompt }]);
-        const reply = result.choices[0].message.content.trim();
-        if (reply.includes('打断')) {
-          const followup = await callDeepSeek([{ role: 'user', content: `候选人回答偏题："${text}"。用一句话追问帮ta回到正轨。角色：${s.role}。` }]);
+        const r = result.choices[0].message.content.trim();
+        if (r.includes('打断')) {
+          const followup = await callDeepSeek([{ role: 'user', content: `候选人回答偏题。\n\n候选人内容："""${clean.replace(/"/g, "'")}"""\n\n角色：${s.role}。请用一句话追问。` }]);
           return res.json({ interrupt: true, reason: '偏题', msg: followup.choices[0].message.content.trim() });
         }
       }
@@ -221,7 +266,8 @@ export default async function handler(req, res) {
     if (url.includes('/api/tts')) {
       let { text } = req.body || {};
       if (!text) return res.status(400).json({ error: 'Missing text' });
-      text = text.replace(/（[^）]*）|[\(（][^)）]*[\)）]/g, '');
+      text = sanitize(text).replace(/（[^）]*）|[\(（][^)）]*[\)）]/g, '');
+      if (!text) return res.status(200).setHeader('Content-Type', 'audio/mpeg').send(Buffer.alloc(0));
       try {
         const client = new TtsClient({
           credential: { secretId: process.env.TENCENT_SECRET_ID, secretKey: process.env.TENCENT_SECRET_KEY },
@@ -248,6 +294,6 @@ export default async function handler(req, res) {
 
     return res.status(404).json({ error: 'Not found' });
   } catch (e) {
-    return res.status(500).json({ error: e.message });
+    return res.status(500).json({ error: 'Internal error' });
   }
 }

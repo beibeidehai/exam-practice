@@ -11,7 +11,36 @@ const PORT = process.env.PORT || 3456;
 const sessions = {};
 
 const FILLER_WORDS = ['嗯', '啊', '呃', '额', '那个', '然后', '就是', '就是说', '这个', '怎么说呢', '其实', '反正', '对吧', '你懂吧'];
-const MAX_ANSWER_LEN = 600; // chars — warn if answer exceeds this
+const MAX_ANSWER_LEN = 600;
+const MAX_BODY = 50_000; // 50KB limit per request
+const SESSION_TTL = 30 * 60 * 1000; // 30min session expiry
+const RATE_WINDOW = 60_000;
+const RATE_MAX = 30; // 30 req/min per IP
+
+const ALLOWED_ROLES = ['考研复试-综合面试','考研复试-英语口语','考研复试-专业综合','产品经理','Java后端开发工程师','前端开发工程师','数据分析师','算法工程师'];
+const ALLOWED_DIFFICULTIES = ['校招/实习','社招1-3年','社招3-5年','大厂高级'];
+
+const rateMap = {};
+const rateLimiter = (ip) => {
+  const now = Date.now();
+  const entry = rateMap[ip] || { count: 0, reset: now + RATE_WINDOW };
+  if (now > entry.reset) { entry.count = 0; entry.reset = now + RATE_WINDOW; }
+  entry.count++;
+  rateMap[ip] = entry;
+  return entry.count <= RATE_MAX;
+};
+
+function sanitize(s) {
+  return String(s).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').slice(0, 2000);
+}
+
+// Session cleanup every 5 min
+setInterval(() => {
+  const now = Date.now();
+  for (const k of Object.keys(sessions)) {
+    if (now - sessions[k]._created > SESSION_TTL) delete sessions[k];
+  }
+}, 5 * 60 * 1000);
 
 function getType(file) {
   const map = { '.html': 'text/html;charset=utf-8', '.js': 'application/javascript', '.css': 'text/css', '.json': 'application/json' };
@@ -170,150 +199,162 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
 
+  const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+  if (req.method === 'POST' && !rateLimiter(ip)) {
+    res.writeHead(429, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ error: 'Too many requests' }));
+  }
+
+  function readBody(r, max) {
+    return new Promise((resolve, reject) => {
+      let body = '', len = 0;
+      r.on('data', c => { len += c.length; if (len > max) reject(new Error('Body too large')); else body += c; });
+      r.on('end', () => resolve(body));
+      r.on('error', reject);
+    });
+  }
+
   // API: start interview
   if (req.url === '/api/start' && req.method === 'POST') {
-    let body = ''; req.on('data', c => body += c);
-    req.on('end', async () => {
-      try {
-        const { role, difficulty } = JSON.parse(body);
-        const sid = Date.now().toString(36);
-        const msg = { role: 'system', content: buildSystemPrompt(role, difficulty) };
-        sessions[sid] = { role, difficulty, history: [msg], questionCount: 0, answers: [], fluencySnapshots: [] };
+    try {
+      const body = await readBody(req, MAX_BODY);
+      const { role, difficulty } = JSON.parse(body);
+      if (!role || !ALLOWED_ROLES.includes(role)) throw new Error('Invalid role');
+      if (difficulty && !ALLOWED_DIFFICULTIES.includes(difficulty)) throw new Error('Invalid difficulty');
+      const sid = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      const msg = { role: 'system', content: buildSystemPrompt(role, difficulty) };
+      sessions[sid] = { _created: Date.now(), role, difficulty, history: [msg], questionCount: 0, answers: [], fluencySnapshots: [] };
 
-        const result = await callDeepSeek(sessions[sid].history);
-        const reply = result.choices[0].message.content;
-        sessions[sid].history.push({ role: 'assistant', content: reply });
-        sessions[sid].questionCount = 1;
+      const result = await callDeepSeek(sessions[sid].history);
+      const reply = result.choices[0].message.content;
+      sessions[sid].history.push({ role: 'assistant', content: reply });
+      sessions[sid].questionCount = 1;
 
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ sid, reply }));
-      } catch (e) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: e.message }));
-      }
-    });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ sid, reply }));
+    } catch (e) {
+      res.writeHead(e.message.includes('Invalid') || e.message.includes('too large') ? 400 : 500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: e.message.includes('Invalid') || e.message.includes('too large') ? e.message : 'Internal error' }));
+    }
     return;
   }
 
   // API: answer & continue
   if (req.url === '/api/answer' && req.method === 'POST') {
-    let body = ''; req.on('data', c => body += c);
-    req.on('end', async () => {
-      try {
-        const { sid, answer } = JSON.parse(body);
-        const s = sessions[sid];
-        if (!s) throw new Error('Session expired, please restart');
+    try {
+      const body = await readBody(req, MAX_BODY);
+      const { sid, answer } = JSON.parse(body);
+      if (!sid || !answer) throw new Error('Missing sid or answer');
+      const s = sessions[sid];
+      if (!s) throw new Error('Session expired, please restart');
 
-        s.history.push({ role: 'user', content: answer });
-        s.answers.push(answer);
-        s.questionCount++;
+      const cleanAnswer = sanitize(answer);
+      s.history.push({ role: 'user', content: cleanAnswer });
+      s.answers.push(cleanAnswer);
+      s.questionCount++;
 
-        if (s.questionCount >= 10 || answer.includes('结束面试')) {
-          const fluency = calcFluency(s.answers);
-          const historyText = s.history.map(m => `[${m.role}]: ${m.content}`).join('\n');
-          const evalPrompt = buildEvalPrompt(s.role, historyText, fluency);
-          const evalResult = await callDeepSeek([{ role: 'user', content: evalPrompt }]);
-          const raw = evalResult.choices[0].message.content;
-          const cleaned = raw.replace(/```json\s*|\s*```/g, '').trim();
-          const evaluation = JSON.parse(cleaned);
-          evaluation._fluency = fluency;
-          delete sessions[sid];
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ done: true, evaluation }));
-          return;
-        }
-
-        const result = await callDeepSeek(s.history);
-        const reply = result.choices[0].message.content;
-        s.history.push({ role: 'assistant', content: reply });
-
+      if (s.questionCount >= 10 || cleanAnswer.includes('结束面试')) {
+        const fluency = calcFluency(s.answers);
+        const historyText = s.history.map(m => `[${m.role}]: ${m.content}`).join('\n');
+        const evalPrompt = buildEvalPrompt(s.role, historyText, fluency);
+        const evalResult = await callDeepSeek([{ role: 'user', content: evalPrompt }]);
+        const raw = evalResult.choices[0].message.content;
+        const cleaned = raw.replace(/```json\s*|\s*```/g, '').trim();
+        const evaluation = JSON.parse(cleaned);
+        evaluation._fluency = fluency;
+        delete sessions[sid];
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ done: false, reply }));
-      } catch (e) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: e.message }));
+        res.end(JSON.stringify({ done: true, evaluation }));
+        return;
       }
-    });
+
+      const result = await callDeepSeek(s.history);
+      const reply = result.choices[0].message.content;
+      s.history.push({ role: 'assistant', content: reply });
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ done: false, reply }));
+    } catch (e) {
+      const status = e.message.includes('expired') || e.message.includes('Missing') ? 400 : 500;
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: status === 400 ? e.message : 'Internal error' }));
+    }
     return;
   }
 
-  // API: interrupt check — AI judges if current speech should be interrupted
+  // API: interrupt check
   if (req.url === '/api/interrupt' && req.method === 'POST') {
-    let body = ''; req.on('data', c => body += c);
-    req.on('end', async () => {
-      try {
-        const { sid, text } = JSON.parse(body);
-        const s = sessions[sid];
-        if (!s) return res.end(JSON.stringify({ interrupt: false }));
+    try {
+      const body = await readBody(req, MAX_BODY);
+      const { sid, text } = JSON.parse(body);
+      const s = sessions[sid];
+      if (!s || !text) return res.end(JSON.stringify({ interrupt: false }));
 
-        // Quick local checks first
-        if (text.length > MAX_ANSWER_LEN) {
-          return res.end(JSON.stringify({ interrupt: true, reason: '回答超长，请精简', msg: '抱歉打断一下，你的回答有些长了，能否用一句话总结核心观点？' }));
-        }
+      const clean = sanitize(text);
 
-        // Count filler words in this chunk
-        let fillerCount = 0;
-        FILLER_WORDS.forEach(w => {
-          const re = new RegExp(w, 'g');
-          const matches = text.match(re);
-          if (matches) fillerCount += matches.length;
-        });
-        if (text.length > 100 && fillerCount / text.length > 0.08) {
-          return res.end(JSON.stringify({ interrupt: true, reason: '填充词过多', msg: '我打断一下，注意到你用了比较多的语气词，试着放慢语速，想清楚再说。' }));
-        }
-
-        // Ask DeepSeek if off-topic (only if text is substantial)
-        if (text.length > 80) {
-          const prompt = `你是面试官。候选人正在回答面试问题。当前转写文本如下。"${text}"。请判断候选人是否明显偏题或逻辑混乱。如果是，回复"打断"并给出追问；如果不是，回复"继续"。只回复两个字："打断"或"继续"。`;
-          const result = await callDeepSeek([{ role: 'user', content: prompt }]);
-          const reply = result.choices[0].message.content.trim();
-          if (reply.includes('打断')) {
-            const followup = await callDeepSeek([
-              { role: 'user', content: `候选人的回答偏题了："${text}"。请用一句话追问，帮ta回到正轨。面试岗位：${s.role}。` },
-            ]);
-            const msg = followup.choices[0].message.content.trim();
-            return res.end(JSON.stringify({ interrupt: true, reason: '偏题', msg }));
-          }
-        }
-
-        res.end(JSON.stringify({ interrupt: false }));
-      } catch (e) {
-        res.end(JSON.stringify({ interrupt: false })); // fail safe — don't block on error
+      if (clean.length > MAX_ANSWER_LEN) {
+        return res.end(JSON.stringify({ interrupt: true, reason: '回答超长', msg: '抱歉打断一下，你的回答有些长了，能否用一句话总结核心观点？' }));
       }
-    });
+
+      let fillerCount = 0;
+      FILLER_WORDS.forEach(w => {
+        const re = new RegExp(w, 'g');
+        const matches = clean.match(re);
+        if (matches) fillerCount += matches.length;
+      });
+      if (clean.length > 100 && fillerCount / clean.length > 0.08) {
+        return res.end(JSON.stringify({ interrupt: true, reason: '填充词过多', msg: '我打断一下，注意到你用了比较多的语气词，试着放慢语速，想清楚再说。' }));
+      }
+
+      if (clean.length > 80) {
+        // Wrap user text in quotes to prevent prompt injection
+        const prompt = `你是面试官。候选人正在回答面试问题。\n\n候选人说："""${clean.replace(/"/g, "'")}"""\n\n判断是否明显偏题或逻辑混乱。回复"打断"或"继续"。`;
+        const result = await callDeepSeek([{ role: 'user', content: prompt }]);
+        const r = result.choices[0].message.content.trim();
+        if (r.includes('打断')) {
+          const followup = await callDeepSeek([
+            { role: 'user', content: `候选人回答偏题，帮ta回到正轨。\n\n候选人内容："""${clean.replace(/"/g, "'")}"""\n\n面试岗位：${s.role}。请用一句话追问。` },
+          ]);
+          return res.end(JSON.stringify({ interrupt: true, reason: '偏题', msg: followup.choices[0].message.content.trim() }));
+        }
+      }
+
+      res.end(JSON.stringify({ interrupt: false }));
+    } catch (e) {
+      res.end(JSON.stringify({ interrupt: false }));
+    }
     return;
   }
 
-  // API: TTS via Tencent Cloud (natural Chinese voices)
+  // API: TTS
   if (req.url === '/api/tts' && req.method === 'POST') {
-    let body = ''; req.on('data', c => body += c);
-    req.on('end', async () => {
-      try {
-        let { text } = JSON.parse(body);
-        text = text.replace(/（[^）]*）|[\(（][^)）]*[\)）]/g, '');
-        const client = new TtsClient({
-          credential: { secretId: TENCENT_SECRET_ID, secretKey: TENCENT_SECRET_KEY },
-          region: 'ap-guangzhou',
-          profile: { httpProfile: { endpoint: 'tts.tencentcloudapi.com' } }
-        });
-        const result = await client.TextToVoice({
-          Text: text,
-          SessionId: Date.now().toString(36),
-          VoiceType: 101003, // 智美自然女声 (精品模型)
-          Codec: 'mp3',
-          SampleRate: 16000,
-          Volume: 5,
-          Speed: 0,
-          ModelType: 1
-        });
-        const audio = Buffer.from(result.Audio, 'base64');
-        res.writeHead(200, { 'Content-Type': 'audio/mpeg' });
-        res.end(audio);
-      } catch (e) {
-        res.writeHead(200, { 'Content-Type': 'audio/mpeg' });
-        res.end(); // fail silently, frontend falls back to browser TTS
-      }
-    });
+    try {
+      const body = await readBody(req, MAX_BODY);
+      let { text } = JSON.parse(body);
+      text = sanitize(text).replace(/（[^）]*）|[\(（][^)）]*[\)）]/g, '');
+      if (!text) { res.writeHead(200, { 'Content-Type': 'audio/mpeg' }); return res.end(Buffer.alloc(0)); }
+      const client = new TtsClient({
+        credential: { secretId: TENCENT_SECRET_ID, secretKey: TENCENT_SECRET_KEY },
+        region: 'ap-guangzhou',
+        profile: { httpProfile: { endpoint: 'tts.tencentcloudapi.com' } }
+      });
+      const result = await client.TextToVoice({
+        Text: text,
+        SessionId: Date.now().toString(36),
+        VoiceType: 101003,
+        Codec: 'mp3',
+        SampleRate: 16000,
+        Volume: 5,
+        Speed: 0,
+        ModelType: 1
+      });
+      const audio = Buffer.from(result.Audio, 'base64');
+      res.writeHead(200, { 'Content-Type': 'audio/mpeg' });
+      res.end(audio);
+    } catch (e) {
+      res.writeHead(200, { 'Content-Type': 'audio/mpeg' });
+      res.end();
+    }
     return;
   }
 
