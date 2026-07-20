@@ -270,7 +270,7 @@ const server = http.createServer(async (req, res) => {
         const result = await client.TextToVoice({
           Text: text,
           SessionId: Date.now().toString(36),
-          VoiceType: 101006, // 对话女声
+          VoiceType: 101008, // 温柔女声
           Codec: 'mp3',
           SampleRate: 16000,
           Volume: 5,
