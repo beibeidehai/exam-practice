@@ -477,7 +477,6 @@ async function submitAnswer(text) {
       document.getElementById('recPanel').style.display = 'none';
       document.getElementById('restartArea').style.display = 'block';
       showScore(data.evaluation);
-      if (ttsOn) speak('面试结束。' + (data.evaluation['总结'] || ''));
     } else {
       addMsg('assistant', data.reply);
       speak(data.reply);
