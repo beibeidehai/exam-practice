@@ -7,6 +7,7 @@
   "rewrites": [
     { "source": "/api/start", "destination": "/api/interview" },
     { "source": "/api/answer", "destination": "/api/interview" },
-    { "source": "/api/interrupt", "destination": "/api/interview" }
+    { "source": "/api/interrupt", "destination": "/api/interview" },
+    { "source": "/api/tts", "destination": "/api/interview" }
   ]
 }

@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "tencentcloud-sdk-nodejs-tts": "^4.1.237"
+  }
+}

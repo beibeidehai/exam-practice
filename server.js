@@ -1,8 +1,12 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const tencentcloud = require('tencentcloud-sdk-nodejs-tts');
+const TtsClient = tencentcloud.tts.v20190823.Client;
 
 const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY;
+const TENCENT_SECRET_ID = process.env.TENCENT_SECRET_ID;
+const TENCENT_SECRET_KEY = process.env.TENCENT_SECRET_KEY;
 const PORT = process.env.PORT || 3456;
 const sessions = {};
 
@@ -15,53 +19,58 @@ function getType(file) {
 }
 
 function buildSystemPrompt(role, difficulty) {
-  // 考研复试 special handling
   if (role === '考研复试-英语口语') {
-    return `You are a postgraduate entrance re-examination English oral interview examiner. Difficulty: ${difficulty}.
+    return `You are a friendly yet professional English oral examiner for a Chinese postgraduate entrance interview. Difficulty: ${difficulty}.
 
-Your task:
-1. Conduct the entire interview in English
-2. Ask one question at a time, follow up based on candidate's answers
-3. Topics: self-introduction, research interests, academic background, why this university/major, future plans
-4. Be professional but encouraging — this is a high-stakes exam for the candidate
-5. After 4-5 exchanges, end with "面试结束"
+Interview flow:
+- Start with a warm greeting in English, introduce yourself as the examiner, then ask the first question naturally.
+- Each turn, listen to the candidate's answer and ask a relevant follow-up. Don't just move to the next topic — dig deeper based on what they said.
+- If an answer is too short or vague, gently push: "Could you elaborate on that?" or "Can you give a specific example?"
+- Topics to cover: self-introduction, academic interests, research experience, motivation for this major/university, future plans.
+- Be encouraging — nod verbally ("That's interesting", "I see") before following up. This is a high-stakes exam, don't intimidate the candidate.
+- After 5-6 exchanges, wrap up with "面试结束" and a brief encouraging remark.
 
-Start now: greet the candidate briefly, then ask your first question.`;
+Start now.`;
   }
   if (role === '考研复试-专业综合') {
-    return `你是一个考研复试专业面试考官，难度：${difficulty}。
+    return `你是一位经验丰富的考研复试导师，正在进行专业综合面试。难度：${difficulty}。
 
-你的任务：
-1. 每次只问一个专业问题，根据回答深挖细节
-2. 考察范围：专业基础知识、学科前沿动态、科研潜质、实验/项目经历
-3. 追问要犀利但不刁难，像真实复试导师一样
-4. 如果回答模糊或偏题，立刻打断追问具体细节
-5. 4-5轮后结束，说"面试结束"
+面试风格：
+- 你不是在念题，而是在和一位有潜力的学生聊天。问完一个问题后，根据ta的回答自然地追问，就像真实的复试导师会做的那样。
+- 如果回答很好，先肯定再深挖："这个项目挺有意思的，你当时为什么选择用这个方法而不是XXX？"
+- 如果回答浮于表面，温和追问："能不能说具体一点？比如举个例子。"
+- 如果回答明显偏题，礼貌拉回："我换个角度问一下..."
+- 考察：专业基础是否扎实、对学科前沿是否了解、有没有科研思维、项目经验能不能讲清楚。
+- 5-6轮后自然收尾，说"面试结束"，给一句鼓励。
 
-现在开始：请候选人简要自我介绍，然后问第一个专业问题。`;
+现在开始：先打个招呼，让候选人简单介绍自己，然后进入第一个专业问题。`;
   }
   if (role === '考研复试-综合面试') {
-    return `你是一个考研复试综合面试考官，难度：${difficulty}。
+    return `你是一位考研复试的综合面试导师，难度：${difficulty}。
 
-你的任务：
-1. 每次只问一个问题，围绕科研经历、读研规划、综合素质展开
-2. 考察：逻辑思维、表达能力、抗压能力、科研潜力、团队协作
-3. 对空泛回答要打断追问具体案例："能不能举个具体的例子？"
-4. 风格介于严肃和轻松之间，模拟真实复试氛围
-5. 4-5轮后结束，说"面试结束"
+面试风格：
+- 氛围轻松但不随意。你在考察学生的综合素质：逻辑、表达、抗压、团队协作、科研潜力。
+- 不要像审讯，要像聊天。每次问一个问题，然后根据回答自然延伸。
+- 对空泛回答："能不能举个具体的例子？你当时是怎么做的？"
+- 对有意思的回答先认可："这个经历很有意思，那在这个过程中你最大的收获是什么？"
+- 适当抛出一点压力问题，看学生怎么应对，但不要太刁难。
+- 5-6轮后自然收尾，说"面试结束"。
 
-现在开始：先让候选人做自我介绍，然后提问。`;
+现在开始：先简单寒暄，让学生自我介绍，然后自然地展开提问。`;
   }
 
-  // Standard job interview
-  return `你是一个专业的${role}面试官，面试难度：${difficulty}。
-你的任务：
-1. 每次只问一个问题，根据候选人上一轮的回答决定追问方向
-2. 如果候选人的回答过于空泛或偏题，立刻打断追问："请说具体一点"或"能举个例子吗"
-3. 4-5轮后结束，说"面试结束"
-4. 风格专业但不严肃，像真实面试官一样互动
+  return `你是一位资深${role}面试官，正在进行一场技术面试。难度：${difficulty}。
 
-现在开始面试。先做自我介绍，然后问第一个问题。`;
+面试风格：
+- 你不是在机械地提问，而是在和候选人进行一场专业对话。
+- 先简单寒暄，让候选人放松，然后自然地进入第一个问题。
+- 每次只问一个问题。根据候选人的回答决定追问方向：答得好就深挖细节，答得模糊就要求举例，答偏了就温和拉回。
+- 像个真实的面试官：有追问、有回应、有互动，不是轮流念稿。
+- 如果候选人的回答特别出彩，可以简短认可（"这个说得不错"），然后继续深入。
+- 如果回答中有明显的知识盲区，不要当面嘲讽，换个角度给机会。
+- 5-6轮后自然收尾，说"面试结束"。
+
+现在开始。`;
 }
 
 function buildEvalPrompt(role, history, fluencyData) {
@@ -242,6 +251,37 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ interrupt: false }));
       } catch (e) {
         res.end(JSON.stringify({ interrupt: false })); // fail safe — don't block on error
+      }
+    });
+    return;
+  }
+
+  // API: TTS via Tencent Cloud (natural Chinese voices)
+  if (req.url === '/api/tts' && req.method === 'POST') {
+    let body = ''; req.on('data', c => body += c);
+    req.on('end', async () => {
+      try {
+        const { text } = JSON.parse(body);
+        const client = new TtsClient({
+          credential: { secretId: TENCENT_SECRET_ID, secretKey: TENCENT_SECRET_KEY },
+          region: 'ap-guangzhou',
+          profile: { httpProfile: { endpoint: 'tts.tencentcloudapi.com' } }
+        });
+        const result = await client.TextToVoice({
+          Text: text,
+          SessionId: Date.now().toString(36),
+          VoiceType: 1001, // 智瑜女声
+          Codec: 'mp3',
+          SampleRate: 16000,
+          Volume: 5,
+          Speed: 0
+        });
+        const audio = Buffer.from(result.Audio, 'base64');
+        res.writeHead(200, { 'Content-Type': 'audio/mpeg' });
+        res.end(audio);
+      } catch (e) {
+        res.writeHead(200, { 'Content-Type': 'audio/mpeg' });
+        res.end(); // fail silently, frontend falls back to browser TTS
       }
     });
     return;
