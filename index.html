@@ -104,8 +104,6 @@
     <p>语音交互 · 实时打断 · 多维评分</p>
   </div>
 
-  <!-- Diagnostic bar -->
-  <div id="diagBar" style="background:#1e1e2e;color:#4ade80;font-size:10px;font-family:monospace;padding:4px 8px;border-radius:6px;margin-bottom:8px;word-break:break-all;line-height:1.4;opacity:.9;"></div>
 
   <!-- ── Setup ── -->
   <div id="setupArea" class="setup">
@@ -187,17 +185,7 @@ let recognition = null, recTimer = null, recSeconds = 0, finalTranscript = '';
 let interruptCheckInterval = null, recActive = false;
 const MAX_REC_SEC = 90, INTERRUPT_CHECK_SEC = 8;
 
-// ── Diagnostic log ──
-const diagLog = [];
-function diag(msg) {
-  const ts = new Date().toISOString().slice(11, 23);
-  const entry = `[${ts}] ${msg}`;
-  diagLog.push(entry);
-  console.log('DIAG:', entry);
-  if (diagLog.length > 15) diagLog.shift();
-  const db = document.getElementById('diagBar');
-  if (db) db.textContent = diagLog.join(' | ');
-}
+function diag(msg) { console.log('DIAG:', msg); }
 
 // ── TTS ──
 let ttsAudio = null;
