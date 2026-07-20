@@ -171,8 +171,7 @@ export default async function handler(req, res) {
         res.setHeader('Content-Type', 'audio/mpeg');
         return res.send(audio);
       } catch (e) {
-        console.error('TTS error:', e.message, e.code);
-        return res.status(500).json({ error: 'TTS failed', message: e.message, code: e.code });
+        return res.status(200).setHeader('Content-Type', 'audio/mpeg').send(Buffer.alloc(0));
       }
     }
 
