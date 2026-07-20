@@ -167,6 +167,11 @@
       <textarea id="textFallback" placeholder="输入你的回答..."></textarea>
       <button class="btn" onclick="sendTextFallback()" style="margin-top:8px;">发送</button>
     </div>
+    <!-- Always-available text input -->
+    <div id="textInputRow" style="display:flex;gap:8px;margin-top:8px;">
+      <input id="textInput" placeholder="或直接打字回答，回车发送..." style="flex:1;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:14px;outline:none;font-family:inherit;" autocomplete="off">
+      <button onclick="sendTextInput()" style="padding:10px 16px;background:var(--c1);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;">发送</button>
+    </div>
   </div>
 
   <!-- ── Score ── -->
@@ -535,16 +540,30 @@ function showTyping() { document.getElementById('typingArea').style.display = 'f
 function hideTyping() { document.getElementById('typingArea').style.display = 'none'; }
 function disableRecBtns() {
   document.querySelectorAll('#recBtnRow button').forEach(b => b.disabled = true);
+  document.getElementById('textInput').disabled = true;
 }
 function enableRecBtns() {
   document.querySelectorAll('#recBtnRow button').forEach(b => b.disabled = false);
+  document.getElementById('textInput').disabled = false;
 }
 
-// Enter key in fallback textarea
+function sendTextInput() {
+  const input = document.getElementById('textInput');
+  const text = input.value.trim();
+  if (!text || waiting) return;
+  input.value = '';
+  addMsg('user', text);
+  submitAnswer(text);
+}
+
+// Enter key: fallback textarea OR text input
 document.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey && document.activeElement === document.getElementById('textFallback')) {
-    e.preventDefault();
-    sendTextFallback();
+  if (e.key === 'Enter' && !e.shiftKey) {
+    if (document.activeElement === document.getElementById('textFallback')) {
+      e.preventDefault(); sendTextFallback();
+    } else if (document.activeElement === document.getElementById('textInput')) {
+      e.preventDefault(); sendTextInput();
+    }
   }
 });
 
