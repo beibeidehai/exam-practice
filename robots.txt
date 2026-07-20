@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://aimock.cloud/sitemap.xml
