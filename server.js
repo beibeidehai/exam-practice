@@ -274,7 +274,7 @@ const server = http.createServer(async (req, res) => {
           Codec: 'mp3',
           SampleRate: 16000,
           Volume: 5,
-          Speed: -0.2
+          Speed: 0
         });
         const audio = Buffer.from(result.Audio, 'base64');
         res.writeHead(200, { 'Content-Type': 'audio/mpeg' });
