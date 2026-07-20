@@ -104,6 +104,9 @@
     <p>语音交互 · 实时打断 · 多维评分</p>
   </div>
 
+  <!-- Diagnostic bar -->
+  <div id="diagBar" style="background:#1e1e2e;color:#4ade80;font-size:10px;font-family:monospace;padding:4px 8px;border-radius:6px;margin-bottom:8px;word-break:break-all;line-height:1.4;opacity:.9;"></div>
+
   <!-- ── Setup ── -->
   <div id="setupArea" class="setup">
     <div>
@@ -181,33 +184,65 @@
 // ── State ──
 let sid = null, waiting = false, ttsOn = true;
 let recognition = null, recTimer = null, recSeconds = 0, finalTranscript = '';
-let interruptCheckInterval = null;
+let interruptCheckInterval = null, recActive = false;
 const MAX_REC_SEC = 90, INTERRUPT_CHECK_SEC = 8;
 
-// ── TTS ──
-function speak(text) {
-  if (!ttsOn || !window.speechSynthesis) return;
-  speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = document.getElementById('roleSelect').value.includes('英语') ? 'en-US' : 'zh-CN';
-  u.rate = 0.95;
-  u.pitch = 1;
-  // Pick a good voice
-  const voices = speechSynthesis.getVoices();
-  const preferred = voices.find(v => v.lang.startsWith(u.lang) && v.name.includes('Female')) || voices.find(v => v.lang.startsWith(u.lang));
-  if (preferred) u.voice = preferred;
-  speechSynthesis.speak(u);
+// ── Diagnostic log ──
+const diagLog = [];
+function diag(msg) {
+  const ts = new Date().toISOString().slice(11, 23);
+  const entry = `[${ts}] ${msg}`;
+  diagLog.push(entry);
+  console.log('DIAG:', entry);
+  if (diagLog.length > 15) diagLog.shift();
+  const db = document.getElementById('diagBar');
+  if (db) db.textContent = diagLog.join(' | ');
 }
+
+// ── TTS ──
+let ttsAudio = null;
+
+async function speak(text) {
+  if (!ttsOn) return;
+  if (ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
+  try {
+    const res = await fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok || res.headers.get('content-length') === '0') throw new Error('empty');
+    const blob = await res.blob();
+    if (blob.size < 100) throw new Error('too small');
+    ttsAudio = new Audio(URL.createObjectURL(blob));
+    ttsAudio.play();
+  } catch (e) {
+    // Fallback to browser TTS
+    if (window.speechSynthesis) {
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = 'zh-CN'; u.rate = 0.9;
+      speechSynthesis.speak(u);
+    }
+  }
+}
+
 function toggleTTS() {
   ttsOn = !ttsOn;
   document.getElementById('ttsToggle').classList.toggle('on', ttsOn);
-  if (!ttsOn) speechSynthesis.cancel();
+  if (!ttsOn) {
+    if (ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
+    if (window.speechSynthesis) speechSynthesis.cancel();
+  }
 }
 
 // ── Speech Recognition ──
+let speechFailed = false;
+
 function initSpeech() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) return null;
+  diag(`initSpeech: SpeechRecognition=${!!SpeechRecognition}, secure=${window.isSecureContext}, proto=${location.protocol}`);
+  if (!SpeechRecognition) { diag('FAIL: SpeechRecognition not available'); return null; }
   const rec = new SpeechRecognition();
   rec.lang = document.getElementById('roleSelect').value.includes('英语') ? 'en-US' : 'zh-CN';
   rec.interimResults = true;
@@ -215,41 +250,75 @@ function initSpeech() {
   rec.maxAlternatives = 1;
 
   rec.onresult = (e) => {
+    diag(`onresult fired, resultIndex=${e.resultIndex}, results=${e.results.length}`);
     let interim = '', final = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
       if (e.results[i].isFinal) final += e.results[i][0].transcript;
       else interim += e.results[i][0].transcript;
     }
-    if (final) finalTranscript += final;
+    if (final) { finalTranscript += final; diag(`final text: "${final.slice(0,50)}"`); }
     document.getElementById('liveText').textContent = finalTranscript + interim;
     document.getElementById('liveText').style.fontStyle = interim ? 'italic' : 'normal';
+    document.getElementById('liveText').style.fontSize = '';
+    document.getElementById('liveText').style.color = '';
+    speechFailed = false;
+    document.getElementById('micDeny').style.display = 'none';
   };
 
   rec.onerror = (e) => {
-    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-      stopRecording(true);
-      document.getElementById('micDeny').style.display = 'block';
-      document.getElementById('btnStartRec').style.display = 'none';
+    diag(`onerror: ${e.error} message=${e.message || 'none'}`);
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed' || e.error === 'network') {
+      switchToTextFallback('语音不可用（需HTTPS或localhost），请打字');
     }
   };
 
   rec.onend = () => {
-    // If we didn't manually stop, restart (continuous mode quirk)
-    if (recognition && recSeconds < MAX_REC_SEC) {
-      try { recognition.start(); } catch (_) {}
+    diag(`onend: recActive=${recActive} recSec=${recSeconds} failed=${speechFailed}`);
+    if (recActive && recSeconds < MAX_REC_SEC && !speechFailed) {
+      diag('onend: auto-restarting recognition');
+      setTimeout(() => { try { recognition.start(); } catch (e) { diag(`onend restart FAIL: ${e.name||e.message}`); } }, 200);
     }
   };
 
+  rec.onstart = () => { diag('recognition STARTED OK'); };
+  rec.onspeechstart = () => { diag('speech detected'); };
+  rec.onspeechend = () => { diag('speech ended'); };
+
+  diag('initSpeech: recognition object created OK');
   return rec;
 }
 
+function switchToTextFallback(msg) {
+  diag(`switchToTextFallback: ${msg}`);
+  speechFailed = true;
+  recActive = false;
+  clearInterval(recTimer);
+  clearInterval(interruptCheckInterval);
+  document.getElementById('waveBox').style.display = 'none';
+  document.getElementById('recBtnRow').innerHTML = `<button class="rec-start" onclick="startRecording()">重试语音</button>`;
+  document.getElementById('recTimer').textContent = '00:00';
+  document.getElementById('liveText').textContent = msg || '请打字回答';
+  document.getElementById('liveText').style.fontStyle = 'normal';
+  document.getElementById('micDeny').style.display = 'block';
+}
+
 function startRecording() {
+  diag(`startRecording called, recognition=${!!recognition}, ttsSpeaking=${window.speechSynthesis?.speaking}`);
   if (!recognition) recognition = initSpeech();
   if (!recognition) {
-    document.getElementById('micDeny').style.display = 'block';
-    document.getElementById('btnStartRec').style.display = 'none';
+    switchToTextFallback('浏览器不支持语音，请打字回答');
     return;
   }
+
+  // Cancel any TTS that's playing — Chrome can't do STT while TTS is active
+  if (window.speechSynthesis) {
+    speechSynthesis.cancel();
+    diag('TTS cancelled before STT start');
+  }
+
+  speechFailed = false;
+  try { recognition.stop(); } catch (_) {}
+  recActive = true;
 
   finalTranscript = '';
   recSeconds = 0;
@@ -258,14 +327,13 @@ function startRecording() {
   document.getElementById('recTimer').textContent = '00:00';
   document.getElementById('recTimer').classList.remove('warn');
   document.getElementById('waveBox').style.display = 'flex';
+  document.getElementById('micDeny').style.display = 'none';
 
-  document.getElementById('btnRow').innerHTML = `
-    <button class="rec-interrupt" onclick="interruptRecording()">打断</button>
-    <button class="rec-stop" onclick="stopRecording()">回答完毕</button>
+  document.getElementById('recBtnRow').innerHTML = `
+    <button class="rec-stop" onclick="stopRecording()" style="flex:1;padding:12px;border-radius:10px;font-size:16px;">回答完毕</button>
   `;
 
-  try { recognition.start(); } catch (_) {}
-
+  // Timer runs independently of speech status
   recTimer = setInterval(() => {
     recSeconds++;
     const m = String(Math.floor(recSeconds / 60)).padStart(2, '0');
@@ -286,19 +354,29 @@ function startRecording() {
       if (d.interrupt) interruptRecording(d.msg || d.reason);
     }).catch(() => {});
   }, INTERRUPT_CHECK_SEC * 1000);
+
+  setTimeout(() => {
+    diag('calling recognition.start()...');
+    try { recognition.start(); diag('recognition.start() succeeded'); } catch (e) {
+      diag(`recognition.start() FAILED: ${e.name || e.message || e}`);
+      switchToTextFallback('语音启动失败，请打字回答');
+    }
+  }, 100);
 }
 
 async function stopRecording(silent) {
+  diag(`stopRecording silent=${silent} recSec=${recSeconds} textLen=${finalTranscript.length}`);
+  recActive = false;
   clearInterval(recTimer);
   clearInterval(interruptCheckInterval);
   if (recognition) {
     try { recognition.stop(); } catch (_) {}
   }
   document.getElementById('waveBox').style.display = 'none';
-  document.getElementById('btnRow').innerHTML = `<button class="rec-start" id="btnStartRec" onclick="startRecording()">开始回答</button>`;
+  document.getElementById('recBtnRow').innerHTML = `<button class="rec-start" onclick="startRecording()">开始回答</button>`;
 
   const text = finalTranscript.trim();
-  if (!text && !silent) return; // nothing recorded
+  if (!text && !silent) return;
 
   if (text) {
     addMsg('user', text);
@@ -312,13 +390,15 @@ async function stopRecording(silent) {
 }
 
 async function interruptRecording(msg) {
+  diag(`interruptRecording msg="${msg||''}" recSec=${recSeconds}`);
+  recActive = false;
   clearInterval(recTimer);
   clearInterval(interruptCheckInterval);
   if (recognition) {
     try { recognition.stop(); } catch (_) {}
   }
   document.getElementById('waveBox').style.display = 'none';
-  document.getElementById('btnRow').innerHTML = `<button class="rec-start" id="btnStartRec" onclick="startRecording()">开始回答</button>`;
+  document.getElementById('recBtnRow').innerHTML = `<button class="rec-start" onclick="startRecording()">开始回答</button>`;
   document.getElementById('recTimer').textContent = '00:00';
   document.getElementById('recTimer').classList.remove('warn');
 
@@ -356,8 +436,10 @@ async function startInterview() {
   const btn = document.getElementById('startBtn');
   btn.disabled = true; btn.textContent = 'AI面试官准备中...';
 
+  diag(`startInterview: role=${role} diff=${difficulty}`);
   // Init speech
   recognition = initSpeech();
+  diag(`startInterview: recognition created=${!!recognition}`);
 
   try {
     const res = await fetch('/api/start', {
