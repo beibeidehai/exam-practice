@@ -270,11 +270,12 @@ const server = http.createServer(async (req, res) => {
         const result = await client.TextToVoice({
           Text: text,
           SessionId: Date.now().toString(36),
-          VoiceType: 101008, // 温柔女声
+          VoiceType: 101001, // 智瑜自然女声 (精品模型)
           Codec: 'mp3',
           SampleRate: 16000,
           Volume: 5,
-          Speed: 0
+          Speed: 0,
+          ModelType: 1
         });
         const audio = Buffer.from(result.Audio, 'base64');
         res.writeHead(200, { 'Content-Type': 'audio/mpeg' });
