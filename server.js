@@ -261,7 +261,8 @@ const server = http.createServer(async (req, res) => {
     let body = ''; req.on('data', c => body += c);
     req.on('end', async () => {
       try {
-        const { text } = JSON.parse(body);
+        let { text } = JSON.parse(body);
+        text = text.replace(/（[^）]*）|[\(（][^)）]*[\)）]/g, '');
         const client = new TtsClient({
           credential: { secretId: TENCENT_SECRET_ID, secretKey: TENCENT_SECRET_KEY },
           region: 'ap-guangzhou',
@@ -270,7 +271,7 @@ const server = http.createServer(async (req, res) => {
         const result = await client.TextToVoice({
           Text: text,
           SessionId: Date.now().toString(36),
-          VoiceType: 101001, // 智瑜自然女声 (精品模型)
+          VoiceType: 101003, // 智美自然女声 (精品模型)
           Codec: 'mp3',
           SampleRate: 16000,
           Volume: 5,

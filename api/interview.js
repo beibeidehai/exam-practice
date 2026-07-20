@@ -150,8 +150,9 @@ export default async function handler(req, res) {
 
     // /api/tts
     if (url.includes('/api/tts')) {
-      const { text } = req.body || {};
+      let { text } = req.body || {};
       if (!text) return res.status(400).json({ error: 'Missing text' });
+      text = text.replace(/（[^）]*）|[\(（][^)）]*[\)）]/g, '');
       try {
         const client = new TtsClient({
           credential: { secretId: process.env.TENCENT_SECRET_ID, secretKey: process.env.TENCENT_SECRET_KEY },
@@ -161,7 +162,7 @@ export default async function handler(req, res) {
         const result = await client.TextToVoice({
           Text: text,
           SessionId: Date.now().toString(36),
-          VoiceType: 101001,
+          VoiceType: 101003,
           Codec: 'mp3',
           SampleRate: 16000,
           Volume: 5,
